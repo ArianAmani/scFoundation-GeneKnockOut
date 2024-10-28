@@ -102,8 +102,8 @@ def add_perturbed_cells(
         adata_.obs[perturbation_key] = pert
 
         # Make sure the perturbation is made correctly (code test)
-        assert adata_.X[:, gene_positions].sum() == perturb_value * len(
-            adata_.X
+        assert (
+            adata_.X[:, gene_positions].sum() == perturb_value * adata.X.shape[0]
         ), 'Error in perturbation'
 
         adatas_to_add.append(adata_.copy())
