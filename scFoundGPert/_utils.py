@@ -88,19 +88,31 @@ def plot_metrics(
     )
 
     # Plot the confusion matrices
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    sns.heatmap(mean_cosine_sim, annot=True, fmt='.2f', ax=axes[0])
+    fig, axes = plt.subplots(3, 1, figsize=(8, 20))
+    sns.heatmap(
+        mean_cosine_sim,
+        annot=False,
+        ax=axes[0],
+        xticklabels=perturbations,
+        yticklabels=perturbations,
+    )
     axes[0].set_title('Cosine Similarity')
-    axes[0].set_xticklabels(perturbations)
-    axes[0].set_yticklabels(perturbations)
-    sns.heatmap(mean_euclidean_dist, annot=True, fmt='.2f', ax=axes[1])
+    sns.heatmap(
+        mean_euclidean_dist,
+        annot=False,
+        ax=axes[1],
+        xticklabels=perturbations,
+        yticklabels=perturbations,
+    )
     axes[1].set_title('Euclidean Distance')
-    axes[1].set_xticklabels(perturbations)
-    axes[1].set_yticklabels(perturbations)
-    sns.heatmap(mean_wasserstein_dist, annot=True, fmt='.2f', ax=axes[2])
+    sns.heatmap(
+        mean_wasserstein_dist,
+        annot=False,
+        ax=axes[2],
+        xticklabels=perturbations,
+        yticklabels=perturbations,
+    )
     axes[2].set_title('Wasserstein Distance')
-    axes[2].set_xticklabels(perturbations)
-    axes[2].set_yticklabels(perturbations)
     plt.tight_layout()
     plt.show()
 
