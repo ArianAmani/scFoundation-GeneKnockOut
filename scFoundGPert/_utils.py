@@ -49,9 +49,7 @@ def plot_metrics(
     return_metrics: bool = True,
 ):
     """
-    Plot confusion matrices for cosine similarity,
-    Euclidean distance, and Wasserstein distance
-    between perturbation groups for each cell type.
+    Plot confusion matrices for cosine similarity, Euclidean distance, and Wasserstein distance between perturbation groups for each cell type. # noqa .
 
     Parameters:
     adata (anndata.AnnData): Annotated data matrix.
