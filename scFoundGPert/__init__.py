@@ -1,6 +1,5 @@
 """
-This module initializes the package by importing key functions and classes
-from submodules and defining the public API.
+This module initializes the package by importing key functions and classes from submodules and defining the public API. # noqa: E501 .
 
 Imports:
     compute_metrics: Function to compute various metrics.
