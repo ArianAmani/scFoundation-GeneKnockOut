@@ -68,7 +68,7 @@ def plot_metrics(
         - wasserstein_dist_confusion (numpy.ndarray):
             Wasserstein distance confusion matrix.
     """
-    perturbations = list(adata.obs[perturbation_key].unique())
+    perturbations = sorted(list(adata.obs[perturbation_key].unique()))
 
     metrics_for_each_ct = get_metric_confusion_matrices(
         adata,
@@ -77,13 +77,13 @@ def plot_metrics(
         cell_type_key,
     )
     # Mean metrics over cell types
-    mean_cosine_sim = np.mean(
+    mean_cosine_sim = np.nanmean(
         [metrics[0] for metrics in metrics_for_each_ct.values()], axis=0
     )
-    mean_euclidean_dist = np.mean(
+    mean_euclidean_dist = np.nanmean(
         [metrics[1] for metrics in metrics_for_each_ct.values()], axis=0
     )
-    mean_wasserstein_dist = np.mean(
+    mean_wasserstein_dist = np.nanmean(
         [metrics[2] for metrics in metrics_for_each_ct.values()], axis=0
     )
 
@@ -146,6 +146,9 @@ def get_metric_confusion_matrices(
         - wasserstein_dist_confusion (numpy.ndarray):
         Wasserstein distance confusion matrix.
     """
+    perturbations = sorted(list(adata.obs[perturbation_key].unique()))
+    perturbation_dict = {pert: i for i, pert in enumerate(perturbations)}
+
     metrics_for_each_ct = {}
     for cell_type in adata.obs[cell_type_key].unique():
         adata_cell_type = adata[adata.obs[cell_type_key] == cell_type].copy()
@@ -157,16 +160,39 @@ def get_metric_confusion_matrices(
                 adata_cell_type.obs[perturbation_key] == perturbation_group
             ].obsm[obsm_key]
 
-        cosine_sim_confusion = np.zeros((len(embeddings), len(embeddings)))
-        euclidean_dist_confusion = np.zeros((len(embeddings), len(embeddings)))
-        wasserstein_dist_confusion = np.zeros((len(embeddings), len(embeddings)))
+        cosine_sim_confusion = np.zeros(
+            (len(perturbation_dict), len(perturbation_dict))
+        )
+        euclidean_dist_confusion = np.zeros(
+            (len(perturbation_dict), len(perturbation_dict))
+        )
+        wasserstein_dist_confusion = np.zeros(
+            (len(perturbation_dict), len(perturbation_dict))
+        )
+
         # Compute metrics for each perturbation pair (create a confusion matrix)
-        for i, (perturbation_group1, emb1) in enumerate(embeddings.items()):
-            for j, (perturbation_group2, emb2) in enumerate(embeddings.items()):
+        for perturbation_group1, emb1 in embeddings.items():
+            for perturbation_group2, emb2 in embeddings.items():
+                i, j = (
+                    perturbation_dict[perturbation_group1],
+                    perturbation_dict[perturbation_group2],
+                )
+
                 cos_sim, eucl_dist, wass_dist = compute_metrics(emb1, emb2)
                 cosine_sim_confusion[i, j] = cos_sim
                 euclidean_dist_confusion[i, j] = eucl_dist
                 wasserstein_dist_confusion[i, j] = wass_dist
+
+        # Set non-existant ones to NaN
+        for pert in perturbation_dict.keys():
+            if pert not in embeddings.keys():
+                i = perturbation_dict[pert]
+                cosine_sim_confusion[i, :] = np.nan
+                cosine_sim_confusion[:, i] = np.nan
+                euclidean_dist_confusion[i, :] = np.nan
+                euclidean_dist_confusion[:, i] = np.nan
+                wasserstein_dist_confusion[i, :] = np.nan
+                wasserstein_dist_confusion[:, i] = np.nan
 
         metrics_for_each_ct[cell_type] = [
             cosine_sim_confusion,
