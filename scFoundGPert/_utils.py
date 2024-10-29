@@ -333,6 +333,7 @@ class CellEmbeddingClassifier:
             encoded_labels,
             test_size=test_size,
             stratify=encoded_labels,
+            random_state=42,
         )
 
         if classifier == 'mlp':
