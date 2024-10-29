@@ -97,14 +97,21 @@ def add_perturbed_cells(
         # Get positions of genes to knockout
         genes_to_knockout = pert.split('+')
         gene_positions = np.where(np.isin(adata_genes_list, genes_to_knockout))[0]
+
+        # Remove cells where all genes already have the perturbed value
+        # Keep only cells which have all genes not with the perturbed value
+        adata_ = adata_[
+            (adata_.X[:, gene_positions].toarray() != perturb_value).all(1)
+        ].copy()
+
         # Set the expression of the genes to the perturbation value
         adata_.X[:, gene_positions] = perturb_value
         adata_.obs[perturbation_key] = pert
 
         # Make sure the perturbation is made correctly (code test)
-        assert (
-            adata_.X[:, gene_positions].sum() == perturb_value * adata.X.shape[0]
-        ), 'Error in perturbation'
+        assert adata_.X[:, gene_positions].sum() == perturb_value * adata.X.shape[
+            0
+        ] * len(gene_positions), 'Error in perturbation'
 
         adatas_to_add.append(adata_.copy())
         del adata_
