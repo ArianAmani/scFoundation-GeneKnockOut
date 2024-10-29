@@ -42,6 +42,7 @@ class scFoundGPert:
         model: str = 'scGPT',  # scGPT or Geneformer
         device: str = 'cuda',
         batch_size: int = 32,
+        config_kwargs: dict = {},
     ):
         """
         Initializes the scFoundGPert class.
@@ -54,6 +55,8 @@ class scFoundGPert:
             The device to run the model on ('cuda' or 'cpu'). Default is 'cuda'.
         batch_size : int, optional
             The batch size for model processing. Default is 32.
+        config_kwargs : dict, optional
+            Additional configuration arguments for the model. Default is {}.
         """
         assert model.lower() in ['scgpt', 'geneformer'], 'Model not supported'
 
@@ -63,11 +66,13 @@ class scFoundGPert:
 
         # Initialize the appropriate model based on the model name
         if self.model_name == 'scgpt':
-            config = scGPTConfig(batch_size=batch_size, device=device)
+            config = scGPTConfig(batch_size=batch_size, device=device, **config_kwargs)
             self.model = scGPT(configurer=config)
 
         elif self.model_name == 'geneformer':
-            config = GeneformerConfig(batch_size=batch_size, device=device)
+            config = GeneformerConfig(
+                batch_size=batch_size, device=device, **config_kwargs
+            )
             self.model = Geneformer(configurer=config)
         else:
             raise ValueError('Model not supported')
