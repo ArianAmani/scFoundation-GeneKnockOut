@@ -1,3 +1,6 @@
+from typing import Literal, Optional
+
+import anndata as an
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -201,3 +204,124 @@ def get_metric_confusion_matrices(
         ]
 
     return metrics_for_each_ct
+
+
+class CellEmbeddingClassifier:
+    def __init__(
+        self,
+        classifier: Literal['mlp', 'dt', 'rf', 'svm'] = 'mlp',
+        classif_params: dict = {},
+    ):
+        """
+        Initialize the cell embedding classifier.
+
+        Parameters:
+        embedding_dim (int): Dimension of the cell embeddings.
+        n_classes (int): Number of classes to classify.
+        classifier (str): Type of classifier to use. Options are 'mlp', 'dt', 'rf', and 'svm'. # noqa
+        Each corresponds to a different classifier:
+        - 'mlp': Multi-layer Perceptron.
+        - 'dt': Decision Tree.
+        - 'rf': Random Forest.
+        - 'svm': Support Vector Machine.
+        Default is 'mlp'.
+        classif_params (dict): Parameters for the classifier.
+        Default is an empty dictionary.
+        """
+        if classifier == 'mlp':
+            from sklearn.neural_network import MLPClassifier
+
+            params = {
+                'hidden_layer_sizes': (
+                    128,
+                    64,
+                ),
+                'alpha': 1e-3,
+            }
+            params.update(classif_params)
+            self.classifier = MLPClassifier(**params)
+        elif classifier == 'dt':  # Decision Tree
+            from sklearn.tree import DecisionTreeClassifier
+
+            params = {}
+            params.update(classif_params)
+            self.classifier = DecisionTreeClassifier(**params)
+        elif classifier == 'rf':  # Random Forest
+            from sklearn.ensemble import RandomForestClassifier
+
+            params = {
+                'n_estimators': 100,
+            }
+            params.update(classif_params)
+            self.classifier = RandomForestClassifier(**params)
+        elif classifier == 'svm':  # Support Vector Machine
+            from sklearn.svm import SVC
+
+            params = {}
+            params.update(classif_params)
+            self.classifier = SVC(**params)
+
+        else:
+            raise ValueError(
+                "Invalid classifier. Choose from 'mlp', 'dt', 'rf', or 'svm'."
+            )
+
+        self.anndata: Optional[an.AnnData] = None
+        self.obsm_key: Optional[str] = None
+        self.perturbation_key: Optional[str] = None
+        self.X_train = None
+        self.X_test = None
+        self.y_train = None
+        self.y_test = None
+
+    def setup(
+        self,
+        anndata: an.AnnData,
+        obsm_key: str,
+        perturbation_key: str,
+        test_size: float = 0.2,
+    ):
+        """
+        Setup the dataset for training and testing the classifier.
+
+        Parameters:
+        anndata (anndata.AnnData): Annotated data matrix.
+        obsm_key (str): Key in adata.obsm containing embeddings.
+        perturbation_key (str): Key in adata.obs containing perturbation information.
+        test_size (float): Fraction of the data to use for testing. Default is 0.2.
+        """
+        from sklearn.model_selection import train_test_split
+
+        self.anndata = anndata
+        self.obsm_key = obsm_key
+        self.perturbation_key = perturbation_key
+
+        # Split the data into training and testing sets
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+            self.anndata.obsm[self.obsm_key],
+            self.anndata.obs[self.perturbation_key].values,
+            test_size=test_size,
+        )
+
+    def train(self):
+        """
+        Train the classifier on the training data.
+        """
+        self.classifier.fit(self.X_train, self.y_train)
+
+    def evaluate(self):
+        """
+        Evaluate the classifier on the testing data.
+        Computes a full classification report.
+
+        Returns:
+        --------
+        str: Classification report.
+        """
+        from sklearn.metrics import classification_report
+
+        y_pred = self.classifier.predict(self.X_test)
+        report = classification_report(self.y_test, y_pred)
+        print(report)
+
+        return report
