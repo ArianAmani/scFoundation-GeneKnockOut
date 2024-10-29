@@ -1,11 +1,13 @@
-from typing import Literal, Optional
+from typing import Literal
 
 import anndata as an
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import torch
 from scipy.spatial import distance
 from scipy.stats import wasserstein_distance
+from sklearn.preprocessing import LabelEncoder
 
 
 # Function to compute metrics between two sets of embeddings
@@ -206,122 +208,177 @@ def get_metric_confusion_matrices(
     return metrics_for_each_ct
 
 
-class CellEmbeddingClassifier:
+class MLPClassifier(torch.nn.Module):
     def __init__(
         self,
-        classifier: Literal['mlp', 'dt', 'rf', 'svm'] = 'mlp',
-        classif_params: dict = {},
+        input_dim: int,
+        n_classes: int,
+        n_layers: int = 2,
+        hidden_dim: int = 128,
+        dropout: float = 0.5,
+        use_batchnorm: bool = True,
+        device: str = 'cpu',
+        batch_size: int = 32,
+        lr: float = 1e-3,
+        epochs: int = 10,
     ):
-        """
-        Initialize the cell embedding classifier.
+        super(MLPClassifier, self).__init__()
 
-        Parameters:
-        embedding_dim (int): Dimension of the cell embeddings.
-        n_classes (int): Number of classes to classify.
-        classifier (str): Type of classifier to use. Options are 'mlp', 'dt', 'rf', and 'svm'. # noqa
-        Each corresponds to a different classifier:
-        - 'mlp': Multi-layer Perceptron.
-        - 'dt': Decision Tree.
-        - 'rf': Random Forest.
-        - 'svm': Support Vector Machine.
-        Default is 'mlp'.
-        classif_params (dict): Parameters for the classifier.
-        Default is an empty dictionary.
-        """
-        if classifier == 'mlp':
-            from sklearn.neural_network import MLPClassifier
+        self.device = device
+        self.batch_size = batch_size
+        self.lr = lr
+        self.epochs = epochs
 
-            params = {
-                'hidden_layer_sizes': (
-                    128,
-                    64,
-                ),
-                'alpha': 1e-3,
-            }
-            params.update(classif_params)
-            self.classifier = MLPClassifier(**params)
-        elif classifier == 'dt':  # Decision Tree
-            from sklearn.tree import DecisionTreeClassifier
+        # Define layers
+        self.layers = torch.nn.ModuleList()
+        self.batchnorms = torch.nn.ModuleList() if use_batchnorm else None
+        self.dropouts = torch.nn.ModuleList() if dropout > 0 else None
 
-            params = {}
-            params.update(classif_params)
-            self.classifier = DecisionTreeClassifier(**params)
-        elif classifier == 'rf':  # Random Forest
-            from sklearn.ensemble import RandomForestClassifier
+        # Input layer
+        self.layers.append(torch.nn.Linear(input_dim, hidden_dim))
+        if use_batchnorm:
+            self.batchnorms.append(torch.nn.BatchNorm1d(hidden_dim))
+        if dropout > 0:
+            self.dropouts.append(torch.nn.Dropout(dropout))
 
-            params = {
-                'n_estimators': 100,
-            }
-            params.update(classif_params)
-            self.classifier = RandomForestClassifier(**params)
-        elif classifier == 'svm':  # Support Vector Machine
-            from sklearn.svm import SVC
+        # Hidden layers
+        for _ in range(n_layers - 1):
+            self.layers.append(torch.nn.Linear(hidden_dim, hidden_dim))
+            if use_batchnorm:
+                self.batchnorms.append(torch.nn.BatchNorm1d(hidden_dim))
+            if dropout > 0:
+                self.dropouts.append(torch.nn.Dropout(dropout))
 
-            params = {}
-            params.update(classif_params)
-            self.classifier = SVC(**params)
+        # Output layer
+        self.layers.append(torch.nn.Linear(hidden_dim, n_classes))
+        self.to(device)
 
-        else:
-            raise ValueError(
-                "Invalid classifier. Choose from 'mlp', 'dt', 'rf', or 'svm'."
+    def forward(self, x):
+        for i, layer in enumerate(self.layers[:-1]):
+            x = torch.relu(layer(x))
+            if self.batchnorms:
+                x = self.batchnorms[i](x)
+            if self.dropouts:
+                x = self.dropouts[i](x)
+        return self.layers[-1](x)  # Final layer without activation (for logits)
+
+    def predict(self, x):
+        self.eval()
+        with torch.no_grad():
+            logits = self.forward(x)
+            return torch.argmax(logits, dim=1)
+
+    def predict_proba(self, x):
+        self.eval()
+        with torch.no_grad():
+            logits = self.forward(x)
+            return torch.softmax(logits, dim=1)
+
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray):
+        self.train()
+
+        # Convert data to tensors and load to device
+        X_train_tensor = torch.tensor(X_train, dtype=torch.float32).to(self.device)
+        y_train_tensor = torch.tensor(y_train, dtype=torch.long).to(self.device)
+        train_data = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
+        train_loader = torch.utils.data.DataLoader(
+            train_data, batch_size=self.batch_size, shuffle=True
+        )
+
+        # Define optimizer and loss function
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        criterion = torch.nn.CrossEntropyLoss()
+
+        for epoch in range(self.epochs):
+            epoch_loss = 0
+            for X_batch, y_batch in train_loader:
+                optimizer.zero_grad()
+                logits = self.forward(X_batch)
+                loss = criterion(logits, y_batch)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+
+            print(
+                f'Epoch [{epoch+1}/{self.epochs}], \
+                    Loss: {epoch_loss / len(train_loader)}'
             )
 
-        self.anndata: Optional[an.AnnData] = None
-        self.obsm_key: Optional[str] = None
-        self.perturbation_key: Optional[str] = None
-        self.X_train = None
-        self.X_test = None
-        self.y_train = None
-        self.y_test = None
 
-    def setup(
+class CellEmbeddingClassifier:
+    def __init__(
         self,
         anndata: an.AnnData,
         obsm_key: str,
         perturbation_key: str,
+        classifier: Literal['mlp', 'dt', 'rf', 'svm'] = 'mlp',
+        classif_params: dict = {},
         test_size: float = 0.2,
     ):
-        """
-        Setup the dataset for training and testing the classifier.
-
-        Parameters:
-        anndata (anndata.AnnData): Annotated data matrix.
-        obsm_key (str): Key in adata.obsm containing embeddings.
-        perturbation_key (str): Key in adata.obs containing perturbation information.
-        test_size (float): Fraction of the data to use for testing. Default is 0.2.
-        """
         from sklearn.model_selection import train_test_split
 
         self.anndata = anndata
         self.obsm_key = obsm_key
         self.perturbation_key = perturbation_key
 
-        # Split the data into training and testing sets
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            self.anndata.obsm[self.obsm_key],
-            self.anndata.obs[self.perturbation_key].values,
-            test_size=test_size,
+        # Encode string labels to integers
+        self.label_encoder = LabelEncoder()
+        encoded_labels = self.label_encoder.fit_transform(
+            self.anndata.obs[self.perturbation_key].values
         )
 
+        # Split data into training and testing sets
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+            self.anndata.obsm[self.obsm_key],
+            encoded_labels,
+            test_size=test_size,
+            stratify=encoded_labels,
+        )
+
+        if classifier == 'mlp':
+            self.classifier = MLPClassifier(
+                input_dim=self.X_train.shape[1],
+                n_classes=len(set(self.y_train)),
+                **classif_params,
+            )
+        elif classifier == 'dt':  # Decision Tree
+            from sklearn.tree import DecisionTreeClassifier
+
+            self.classifier = DecisionTreeClassifier(**classif_params)
+        elif classifier == 'rf':  # Random Forest
+            from sklearn.ensemble import RandomForestClassifier
+
+            self.classifier = RandomForestClassifier(**classif_params)
+        elif classifier == 'svm':  # Support Vector Machine
+            from sklearn.svm import SVC
+
+            self.classifier = SVC(**classif_params)
+        else:
+            raise ValueError(
+                "Invalid classifier. Choose from 'mlp', 'dt', 'rf', or 'svm'."
+            )
+
     def train(self):
-        """
-        Train the classifier on the training data.
-        """
-        self.classifier.fit(self.X_train, self.y_train)
+        if isinstance(self.classifier, MLPClassifier):
+            self.classifier.fit(self.X_train, self.y_train)
+        else:
+            self.classifier.fit(self.X_train, self.y_train)
 
     def evaluate(self):
-        """
-        Evaluate the classifier on the testing data.
-        Computes a full classification report.
-
-        Returns:
-        --------
-        str: Classification report.
-        """
         from sklearn.metrics import classification_report
 
-        y_pred = self.classifier.predict(self.X_test)
-        report = classification_report(self.y_test, y_pred)
-        print(report)
+        if isinstance(self.classifier, MLPClassifier):
+            X_test_tensor = torch.tensor(self.X_test, dtype=torch.float32).to(
+                self.classifier.device
+            )
+            y_pred = self.classifier.predict(X_test_tensor).cpu().numpy()
+        else:
+            y_pred = self.classifier.predict(self.X_test)
 
+        # Decode predictions and true labels to original string labels
+        y_pred_labels = self.label_encoder.inverse_transform(y_pred)
+        y_test_labels = self.label_encoder.inverse_transform(self.y_test)
+
+        report = classification_report(y_test_labels, y_pred_labels)
+        print(report)
         return report
